@@ -1,0 +1,52 @@
+----------------------------------
+1. Fix
+----------------------------------
+Bag heppen when click button
+
+Stepsto reproduce:
+1. Open project
+2. Press button
+3. Chek which error you have
+
+Acshual resalt:
+Error opens
+
+Expekted resalt:
+Everything work
+
+----------------------------------
+2. Translate
+----------------------------------
+QA-інженер заходить у бар.
+Замовляє пиво. Замовляє 0 пива.
+Замовляє 9999999999 пива.
+Замовляє ящірку. Замовляє -1 пива.
+Замовляє ueicbksjdhd.
+Заходить перший справжній клієнт і питає, де туалет.
+Бар спалахує у вогні, вбиваючи всіх.
+
+----------------------------------
+3. Template
+----------------------------------
+
+
+----------------------------------
+4. Explain
+----------------------------------
+pyinstaller --noconfirm --onefile --windowed --name "FixItAI" --collect-submodules pynput --collect-submodules PIL --add-data "Icons;Icons" --icon="Icons/FixItAI.ico" FixItAI.py
+
+----------------------------------
+5. Summarize
+----------------------------------
+Humanity is facing difficult times: various monsters from outer space, the depths of the earth, scientific laboratories,
+and goodness knows where else have begun treating Mother Earth as their own home. Methodically destroying one city after
+another, they bring death and destruction, striking fear into the hearts of onlookers. However, these onlookers have nothing
+to fear—aside from the risk of a villain's stray attack—because our protagonist, a bald young man named Saitama with an expression
+of cosmic boredom on his face, stands guard over their peace.
+
+Do not be fooled by his unassuming appearance: despite lacking hair, a cool costume, and the repertoire of grandiose speeches expected
+of a savior of the universe, Saitama is incredibly strong. Three years ago, after losing his job and deciding to become a hero,
+he trained so intensely that he can now defeat any monster with a single punch. But why is he so gloomy and dissatisfied with life?
+The reason is simple: the greatest heroes fall into despair when they lack a worthy opponent, and no villain can last a single round
+against Saitama. Consequently, neither his numerous victories, nor the respect of his new "disciple," nor interactions with his professional
+colleagues bring him much joy—he can only hope that worthy opponents await him somewhere ahead.

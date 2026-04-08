@@ -1,0 +1,6 @@
+.idea/
+.venv/
+build/
+FixItAI.lnk
+Instruction.txt
+dist/APIAndModel.txt

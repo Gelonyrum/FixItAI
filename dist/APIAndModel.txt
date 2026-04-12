@@ -1,4 +1,4 @@
 Put your API key here
-models/gemma-4-31b-it
+models/gemini-flash-lite-latest
 1) Відповідай ЗАВЖДИ українською мовою
 2) Упускай зайву ввічливість, пиши по-суті

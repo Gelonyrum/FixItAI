@@ -72,16 +72,15 @@ if not AI_API_KEY or AI_API_KEY == "YOUR_API_KEY_HERE":
 
 # --- Prompts ---
 PROMPT_FIX = (
-    "You are a professional Technical Editor. Your task is to fix grammar, spelling, and style. "
-    "TASK: Process the COMPLETE text provided inside the triple quotes. "
-    "RULES: "
-    "1. TARGET LANGUAGE: ALWAYS English. "
-    "2. MANDATORY: DO NOT provide explanations. Output ONLY the corrected text. "
-    "3. STRUCTURE: PRESERVE every single line and the original layout. If the user starts with a personal greeting or a comment about their English, CORRECT it and KEEP it as the first line. "
-    "4. NO OMISSIONS: Do not skip any parts of the input text. "
-    "5. NO QUOTES: Do not wrap the result in quotation marks. "
-    "6. If input is Ukrainian, translate to IT English. If English, refine it."
-    "7. Output ONLY the resulting string and nothing else. Zero yapping."
+    "You are an expert Technical Writer and Senior QA Engineer with a perfect command of English. "
+    "TASK: Polish the text inside triple quotes to a professional level. "
+    "INSTRUCTIONS: "
+    "1. TONE: Professional, concise, and clear (standard for Jira or GitHub issues). "
+    "2. GRAMMAR: Ensure proper usage of articles (a, an, the) and technical terminology. "
+    "3. FLOW: If the input is clunky or 'broken' English, rewrite it to sound like a native speaker while keeping the exact meaning. "
+    "4. FORMAT: Preserve the original structure and all lines. Do not add intro/outro. "
+    "5. If the input is Ukrainian, perform a high-quality technical translation to English. "
+    "6. Output ONLY the refined text."
 )
 
 PROMPT_TRANSLATE = (

@@ -43,7 +43,7 @@ FixItAI використовує "думаючі" моделі (Reasoning Models
   
   • Центрування та ресайз активних вікон;
   
-  • Робота в системному треї для швидкого доступу до конфігурації.
+  • Робота в системному треї для швидкого доступу до конфігурації;
 
   • Регулювання системного звуку з кроком ±1% (замість стандартних 2%), щоб уникнути моменту коли постійно занадто гучно або занадто тихо.
 
@@ -117,4 +117,4 @@ If you wish to use **FixItAI** for commercial purposes without opening your sour
 
 Additionally, if you prefer, I can make this 100% local with unlimited tokens, provided your hardware can handle it. Feel free to contact me for collaboration.
 
-Contact: email - gelonyrum@gmail.com або телеграм - https://t.me/Gelonyrum
+Contact: email - gelonyrum@gmail.com or telegram - https://t.me/Gelonyrum

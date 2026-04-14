@@ -37,3 +37,7 @@ SendCmd(action) {
     ; curl просто смикає URL і відразу закривається
     Run('curl -s "http://127.0.0.1:41769/' . action . '"', , "Hide")
 }
+
+; Volume Control (Step 1%)
+Volume_Up::   SoundSetVolume "+1"
+Volume_Down:: SoundSetVolume "-1"

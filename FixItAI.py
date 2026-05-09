@@ -522,6 +522,53 @@ def call_AI_vision():
         threading.Thread(target=lambda: ResultWindow("System Error", error_msg), daemon=True).start()
         winsound.Beep(200, 600)
 
+def call_AI_vision_translate():
+    """Extracts text from an image and translates it to Ukrainian."""
+    try:
+        client = get_ai_client()
+        if not client: return
+
+        img = ImageGrab.grabclipboard()
+        if img is None or not isinstance(img, Image.Image):
+            threading.Thread(target=lambda: ResultWindow("Error", "No image in the Clipboard!"), daemon=True).start()
+            winsound.Beep(300, 400)
+            return
+
+        winsound.Beep(400, 50)
+
+        def run_vision_translate_request():
+            try:
+                # System prompt for OCR + Translation
+                instruction = (
+                    "OCR this image and TRANSLATE the extracted text to UKRAINIAN. "
+                    "Return ONLY the translated text. Maintain formatting if possible. No yapping."
+                )
+
+                response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=img,
+                    config={"system_instruction": instruction}
+                )
+                res = response.text.strip()
+
+                # Clean wrappers
+                for wrapper in ["'''", '"""', "```"]:
+                    if res.startswith(wrapper) and res.endswith(wrapper):
+                        res = res[len(wrapper):-len(wrapper)].strip()
+
+                pyperclip.copy(res)
+                threading.Thread(target=lambda: ResultWindow(f"Vision Translate ({MODEL_NAME})", res), daemon=True).start()
+                winsound.Beep(1000, 100)
+            except Exception as e:
+                error_str = str(e)
+                threading.Thread(target=lambda err=error_str: ResultWindow("API Error", err), daemon=True).start()
+                winsound.Beep(200, 600)
+
+        threading.Thread(target=run_vision_translate_request, daemon=True).start()
+    except Exception as e:
+        error_msg = str(e)
+        threading.Thread(target=lambda: ResultWindow("System Error", error_msg), daemon=True).start()
+
 def call_AI_describe_image():
     # Describes the content of an image from the clipboard and starts a chat
     global current_chat_session, MODEL_NAME, CHAT_PROMPT
@@ -780,6 +827,7 @@ class CommandHandler(BaseHTTPRequestHandler):
             "template": (insert_text_template, ()),
             "center_window": (resize_and_center_window, ()),
             "vision": (call_AI_vision, ()),
+            "ocr_translate": (call_AI_vision_translate, ()),
             "describe_img": (call_AI_describe_image, ()),
             "chat_new": (call_AI_chat, (True,)),
             "chat_resume": (call_AI_chat, (False,)),
@@ -837,6 +885,7 @@ def show_help():
         "CapsLock + [*]    : Explain selected text & Terms\n"
         "CapsLock + [/]    : Insert text from Template\n"
         "CapsLock + [Num5] : Resize the window to 1500x1100 and center it\n"
+        "CapsLock + [Num1] : Extract & Translate text from Image to Ukrainian\n"
         "CapsLock + [Num4] : Describe Image from Clipboard\n"
         "CapsLock + [Num7] : Extract text from Clipboard Image\n"
         "CapsLock + [Num6] : Quick Summary of selected text\n"

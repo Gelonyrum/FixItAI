@@ -61,6 +61,8 @@ This allows you to observe the full processing workflow without unnecessary dela
 
 `CapsLock` + `Num 4`	  OCR: Describe image (with interactive refinement)
 
+`CapsLock` + `Num 1`	  OCR: Translate the text from the clipboard image into Ukrainian
+
 `CapsLock` + `Num 6`	  Summarize selected text
 
 `CapsLock` + `Num 8/9`	New chat / Continue previous chat

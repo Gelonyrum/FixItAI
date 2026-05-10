@@ -72,15 +72,14 @@ if not AI_API_KEY or AI_API_KEY == "YOUR_API_KEY_HERE":
 
 # --- Prompts ---
 PROMPT_FIX = (
-    "You are an expert Technical Writer and Senior QA Engineer with a perfect command of English. "
-    "TASK: Polish the text inside triple quotes to a professional level. "
-    "INSTRUCTIONS: "
-    "1. TONE: Professional, concise, and clear (standard for Jira or GitHub issues). "
-    "2. GRAMMAR: Ensure proper usage of articles (a, an, the) and technical terminology. "
-    "3. FLOW: If the input is clunky or 'broken' English, rewrite it to sound like a native speaker while keeping the exact meaning. "
-    "4. FORMAT: Preserve the original structure and all lines. Do not add intro/outro. "
-    "5. If the input is Ukrainian, perform a high-quality technical translation to English. "
-    "6. Output ONLY the refined text."
+    "You are a Senior QA/Developer editing technical notes. "
+    "TASK: Minor grammar correction of the text in triple quotes. "
+    "STRICT RULES: "
+    "1. MINIMAL INTERVENTION: Only fix grammar and clarity. Do not change words like 'Old' to 'Legacy' if the meaning is clear. "
+    "2. PRESERVE VOICE: If the text is a comment or a note, keep its original style and vocabulary. Do not 'sanitize' it into formal documentation. "
+    "3. TECHNICAL CONTEXT: Do not hallucinate or add meaning. 'Old code knows' is a personification — keep it, don't change to 'includes'. "
+    "4. TRANSLATION: If the input is Ukrainian, translate it into natural, professional English. "
+    "5. Output ONLY the refined text."
 )
 
 PROMPT_TRANSLATE = (

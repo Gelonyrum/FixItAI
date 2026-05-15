@@ -88,6 +88,10 @@ PROMPT_TRANSLATE = (
     "1. DESTINATION LANGUAGE: UKRAINIAN ONLY. "
     "2. MANDATORY RULE: Never return text in the source language. No matter what the input language is, the output MUST be in Ukrainian. "
     "3. FORMAT: Return ONLY the translated text."
+    "4. REFINEMENT RULE: If the input is already in Ukrainian, act as a Senior Editor: "
+    "   - Apply MINIMAL INTERVENTION: fix only grammar, punctuation, and clarity. "
+    "   - PRESERVE VOICE: keep the original style, technical slang, and vocabulary. "
+    "   - TECHNICAL CONTEXT: do not change technical metaphors or 'sanitize' the tone. "
 )
 
 # --- Core Functions ---
@@ -587,7 +591,13 @@ def call_AI_describe_image():
             global current_chat_session
             try:
                 # System instruction for vision chat
-                instruction = f"{CHAT_PROMPT}\n\nТи бачиш зображення, яке надіслав користувач. Опиши його коротко, а потім відповідай на будь-які уточнюючі питання по ньому."
+                instruction = (
+                    f"{CHAT_PROMPT}\n\n"
+                    "Ти — QA-інженер. Твоє завдання: "
+                    "1. Коротко описати, що зображено на скріншоті. "
+                    "2. Перевірити його на наявність багів (UI, UX, візуальні помилки, текст, логіка). "
+                    "Відповідай структуровано: спочатку опис, потім перелік знайдених проблем."
+                )
 
                 # Create a new chat session for this image
                 current_chat_session = client.chats.create(
@@ -597,7 +607,7 @@ def call_AI_describe_image():
                 )
 
                 # Send the image as the first message
-                prompt = "Опиши що зображено на цій картинці. Будь лаконічним. Пиши по-суті."
+                prompt = "Проаналізуй цей скріншот: опиши його зміст, а потім знайди можливі баги або проблеми з інтерфейсом."
                 response = current_chat_session.send_message([prompt, img])
                 res = response.text.strip()
 
@@ -714,7 +724,7 @@ def list_models_action():
             output = [
                 "--- AVAILABLE MODELS ---\n",
                 "Copy the ID (e.g., 'gemma-3-27b-it') and paste it into APIAndModel.txt\n",
-                "Then use 'Reload Config' in the tray menu.\n",
+                "Then restart FixItAI to apply changes.\n",
                 "=" * 50 + "\n"
             ]
 
@@ -733,21 +743,6 @@ def list_models_action():
 
     # Run in a separate thread to keep the Tray Menu responsive
     threading.Thread(target=fetch_and_show, daemon=True).start()
-
-def reload_config_action():
-    # Reloads the configuration file.
-    global AI_API_KEY, MODEL_NAME, CHAT_PROMPT, ai_client
-
-    AI_API_KEY, MODEL_NAME, CHAT_PROMPT = load_config()
-    ai_client = None # Force client re-initialization on the next call
-
-    if AI_API_KEY and AI_API_KEY != "YOUR_API_KEY_HERE":
-        # No more global configure() call needed
-        winsound.Beep(1000, 100)
-        print(f"Config reloaded. Model: {MODEL_NAME}")
-    else:
-        print("API Key not set correctly.")
-        winsound.Beep(300, 300)
 
 def resize_and_center_window():
     # Resizes the active window and centers it on the screen.
@@ -914,7 +909,6 @@ def setup_tray():
     # Creating the menu with new functional items
     menu = pystray.Menu(
         item('List Available Models', list_models_action),
-        item('Reload Config', reload_config_action),
         item('Open Config File', open_config_file),
         pystray.Menu.SEPARATOR,
         item('Open Template File', open_template_file),

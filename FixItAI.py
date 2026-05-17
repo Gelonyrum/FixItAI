@@ -1,6 +1,8 @@
 import threading
 import tkinter as tk
+import queue
 import google.genai as genai
+from google.genai import types
 import winsound
 import pyperclip
 import time
@@ -9,6 +11,7 @@ from PIL import Image, ImageDraw, ImageGrab
 import pystray
 import os
 import re
+from typing import Any, Literal, cast
 import pygetwindow as gw
 from win32.lib import win32con
 import win32gui
@@ -23,10 +26,32 @@ if IS_DEBUG:
 else:
     BASE_DIR = ""
 
+# API retry settings
+AI_RETRY_ATTEMPTS = 15
+
 current_chat_session = None  # Chat history
 ai_client = None # Global AI client to keep sessions alive
 tray_icon = None
 ahk_process = None
+window_queue = queue.Queue()
+root = None
+
+def create_window(title, text=None, is_chat=False, load_history=False):
+    # Sends a request to the GUI thread to create a new window
+    window_queue.put((title, text, is_chat, load_history))
+
+def check_queue():
+    # Processes the window creation queue in the GUI thread
+    try:
+        while True:
+            title, text, is_chat, load_history = window_queue.get_nowait()
+            ResultWindow(title, text, is_chat, load_history)
+    except queue.Empty:
+        pass
+    finally:
+        if root:
+            # noinspection PyArgumentList
+            root.after(100, check_queue)  # type: ignore
 
 def get_full_path(filename):
     # Joins the base directory and filename with correct system slashes.
@@ -63,7 +88,14 @@ def get_ai_client():
     """Returns a persistent AI client instance."""
     global ai_client
     if ai_client is None and AI_API_KEY and AI_API_KEY != "YOUR_API_KEY_HERE":
-        ai_client = genai.Client(api_key=AI_API_KEY)
+        ai_client = genai.Client(
+            api_key=AI_API_KEY,
+            http_options=types.HttpOptions(
+                retry_options=types.HttpRetryOptions(
+                    attempts=AI_RETRY_ATTEMPTS,
+                )
+            )
+        )
     return ai_client
 
 # Initialize AI API - just check the key
@@ -79,7 +111,8 @@ PROMPT_FIX = (
     "2. PRESERVE VOICE: If the text is a comment or a note, keep its original style and vocabulary. Do not 'sanitize' it into formal documentation. "
     "3. TECHNICAL CONTEXT: Do not hallucinate or add meaning. 'Old code knows' is a personification — keep it, don't change to 'includes'. "
     "4. TRANSLATION: If the input is Ukrainian, translate it into natural, professional English. "
-    "5. Output ONLY the refined text."
+    "5. ARTICLES ACCURACY: Pay special attention to articles (a, an, the). Ensure they are placed correctly according to English grammar rules, especially when translating from article-free languages, while keeping the technical context natural. "
+    "6. Output ONLY the refined text."
 )
 
 PROMPT_TRANSLATE = (
@@ -115,24 +148,24 @@ def perform_auto_copy():
         time.sleep(0.05)
     return False
 
-class ResultWindow:
+class ResultWindow(tk.Toplevel):
     """Smart window that adapts UI for translation or chat"""
-    def __init__(self, title, text=None, is_chat=False, load_history=False):
-        self.root = tk.Tk()
-        self.root.title("FixItAI")
-        self.root.attributes("-topmost", False)
+    def __init__(self, _title, text=None, is_chat=False, load_history=False):
+        super().__init__(root)
+        self.title("FixItAI")
+        self.attributes("-topmost", False)
         self.is_chat = is_chat
 
         bg_dark, text_bg, text_fg, accent = "#1e1e1e", "#252526", "#d4d4d4", "#2e7d32"
 
         w, h = 900, 800 if is_chat else 700
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        self.root.geometry(f"{w}x{h}+{int(sw/2-w/2)}+{int(sh/2-h/2)}")
-        self.root.configure(bg=bg_dark)
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.geometry(f"{w}x{h}+{int(sw/2-w/2)}+{int(sh/2-h/2)}")
+        self.configure(bg=bg_dark)
 
         # 1. Main Text Area
         self.txt_area = tk.Text(
-            self.root, wrap=tk.WORD, font=("Consolas", 12),
+            self, wrap=cast(Literal["none", "char", "word"], tk.WORD), font=("Consolas", 12),
             bg=text_bg, fg=text_fg, insertbackground="white",
             padx=15, pady=15, relief="flat", bd=0, highlightthickness=0
         )
@@ -141,7 +174,7 @@ class ResultWindow:
             # --- CHAT MODE UI ---
             self.txt_area.pack(expand=True, fill='both', padx=15, pady=(15, 10))
 
-            self.input_frame = tk.Frame(self.root, bg=bg_dark)
+            self.input_frame = tk.Frame(self, bg=bg_dark)
             self.input_frame.pack(fill='x', padx=15, pady=(0, 15))
 
             self.input_field = tk.Text(
@@ -149,16 +182,16 @@ class ResultWindow:
                 bg="#3c3c3c", fg="white", insertbackground="white",
                 relief="flat", height=6
             )
-            self.input_field.pack(side=tk.LEFT, expand=True, fill='x')
+            self.input_field.pack(side=cast(Literal["left", "right", "top", "bottom"], tk.LEFT), expand=True, fill='x')
 
             # Bind Shift+Enter (new line) and Enter (send)
             self.input_field.bind("<Return>", self._handle_return)
 
             # Load history or show a welcome message
-            if load_history and current_chat_session:
+            if load_history and current_chat_session is not None:
                 try:
                     # Fetch history from API
-                    history = current_chat_session.get_history()
+                    history = cast(Any, current_chat_session).get_history() or []
                     for message in history:
                         # Skip non-dialogue roles
                         if message.role not in ["user", "model"]:
@@ -192,7 +225,7 @@ class ResultWindow:
                 self.txt_area.insert(tk.INSERT, text)
 
             self.copy_btn = tk.Button(
-                self.root, text="Copy & Close", command=self.copy_and_close,
+                self, text="Copy & Close", command=self.copy_and_close,
                 bg=accent, fg="white", font=("Segue UI", 11, "bold"),
                 padx=30, pady=10, relief="flat", activebackground="#388e3c",
                 activeforeground="white", cursor="hand2"
@@ -200,20 +233,17 @@ class ResultWindow:
             self.copy_btn.place(relx=0.5, rely=1.0, y=-25, anchor='s')
 
         # Core bindings
-        self.root.protocol("WM_DELETE_WINDOW", self.close_window)
-        self.root.bind_all("<Control-Key>", self.handle_control_keys)
+        self.protocol("WM_DELETE_WINDOW", self.close_window)
+        self.bind_all("<Control-Key>", self.handle_control_keys)
 
         if self.is_chat:
             self.input_field.focus_set()
         threading.Thread(target=lambda: force_focus_by_title("FixItAI"), daemon=True).start()
 
-        self.root.mainloop()
-
     # --- Shared Methods ---
-    def close_window(self, event=None):
-        # Stops the mainloop and destroys the window safely to prevent thread lock
-        self.root.quit()
-        self.root.destroy()
+    def close_window(self, _event=None):
+        # Destroys the Toplevel window safely
+        self.destroy()
 
     def copy_and_close(self, _event=None):
         # Copies text and safely closes the window.
@@ -238,9 +268,9 @@ class ResultWindow:
         self.send_chat_message()
         return "break"
 
-    def manual_copy(self, event=None):
+    def manual_copy(self, _event=None):
         try:
-            focused_widget = self.root.focus_get()
+            focused_widget = self.focus_get()
 
             if self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
                 selected = self.input_field.get(tk.SEL_FIRST, tk.SEL_LAST)
@@ -252,7 +282,7 @@ class ResultWindow:
             pass
         return "break"
 
-    def manual_paste(self, event=None):
+    def manual_paste(self, _event=None):
         if self.is_chat:
             # In chat mode, paste ONLY into the input field, ignoring the main window.
             self.input_field.insert(tk.INSERT, pyperclip.paste())
@@ -261,22 +291,23 @@ class ResultWindow:
             self.txt_area.insert(tk.INSERT, pyperclip.paste())
         return "break"  # Stops further propagation of the event in Tkinter.
 
-    def manual_cut(self, event=None):
-        focused_widget = self.root.focus_get()
+    def manual_cut(self, _event=None):
+        focused_widget = self.focus_get()
         self.manual_copy()
         try:
             if self.is_chat and focused_widget == self.input_field:
                 self.input_field.delete(tk.SEL_FIRST, tk.SEL_LAST)
             else:
-                self.txt_area.config(state=tk.NORMAL)
+                self.txt_area.config(state=cast(Literal["normal", "disabled"], tk.NORMAL))
                 self.txt_area.delete(tk.SEL_FIRST, tk.SEL_LAST)
-                if self.is_chat: self.txt_area.config(state=tk.DISABLED)
+                if self.is_chat:
+                    self.txt_area.config(state=cast(Literal["normal", "disabled"], tk.DISABLED))
         except tk.TclError:
             pass
         return "break"
 
-    def select_all(self, event=None):
-        focused_widget = self.root.focus_get()
+    def select_all(self, _event=None):
+        focused_widget = self.focus_get()
 
         if self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
             self.input_field.tag_add(tk.SEL, "1.0", tk.END)
@@ -290,7 +321,7 @@ class ResultWindow:
     # --- Chat Specific Methods ---
     def append_message(self, sender, text):
         # Formats and appends messages to chat area.
-        self.txt_area.config(state=tk.NORMAL)
+        self.txt_area.config(state=cast(Literal["normal", "disabled"], tk.NORMAL))
         
         # 1. Header with sender name
         header = f"\n[{sender.upper()}]:\n"
@@ -302,7 +333,7 @@ class ResultWindow:
         
         # --- MODIFIED: More careful list replacement to avoid breaking layout ---
         # Replace * or - at the start of line with • only if it's a simple list
-        text = re.sub(r'(?m)^(\s*)[\*\-]\s+', r'\1• ', text)
+        text = re.sub(r'(?m)^(\s*)[*-]\s+', r'\1• ', text)
 
         # Remove inline code backticks `text` -> text
         text = re.sub(r'`([^`]+)`', r'\1', text)
@@ -317,8 +348,8 @@ class ResultWindow:
         text = re.sub(r'\\Leftrightarrow\$?', '⇔', text)
 
         # Math & Logic
-        text = re.sub(r'\\le(?:q)?\$?', '≤', text)
-        text = re.sub(r'\\ge(?:q)?\$?', '≥', text)
+        text = re.sub(r'\\le\$?', '≤', text)
+        text = re.sub(r'\\ge\$?', '≥', text)
         text = re.sub(r'\\neq\$?', '≠', text)
         text = re.sub(r'\\approx\$?', '≈', text)
         text = re.sub(r'\\times\$?', '×', text)
@@ -347,7 +378,7 @@ class ResultWindow:
         
         # Apply formatting and scroll
         self.txt_area.tag_configure("bold_font", font=("Consolas", 12, "bold"))
-        self.txt_area.config(state=tk.DISABLED)
+        self.txt_area.config(state=cast(Literal["normal", "disabled"], tk.DISABLED))
         self.txt_area.see(tk.END)
 
     def send_chat_message(self):
@@ -362,27 +393,28 @@ class ResultWindow:
         def run_async():
             try:
                 # Get the response from AI
-                response = current_chat_session.send_message(user_text)
-                
-                # Filter out thoughts from the immediate response as well
-                clean_text = ""
-                if hasattr(response, 'candidates') and response.candidates:
-                    content = response.candidates[0].content
-                    clean_parts = [p.text for p in content.parts if not (hasattr(p, 'thought') and p.thought) and hasattr(p, 'text')]
-                    clean_text = "".join(clean_parts)
-                else:
-                    # Fallback for simpler responses
-                    clean_text = response.text
+                if current_chat_session is not None:
+                    response = cast(Any, current_chat_session).send_message(user_text)
+                    
+                    # Filter out thoughts from the immediate response as well
+                    clean_text = ""
+                    if response and hasattr(response, 'candidates') and response.candidates:
+                        content = response.candidates[0].content
+                        clean_parts = [p.text for p in content.parts if not (hasattr(p, 'thought') and p.thought) and hasattr(p, 'text')]
+                        clean_text = "".join(clean_parts)
+                    elif response:
+                        # Fallback for simpler responses
+                        clean_text = response.text if response.text else ""
 
-                self.root.after(0, lambda: self.append_message("Agent", clean_text))
-                winsound.Beep(800, 50)
+                    self.after(0, self.append_message, "Agent", clean_text)
+                    winsound.Beep(800, 50)
             except Exception as e:
                 error_str = str(e)
-                self.root.after(0, lambda err=error_str: self.append_message("Error", err))
+                self.after(0, self.append_message, "Error", error_str)
 
         threading.Thread(target=run_async, daemon=True).start()
 
-def call_AI_chat(is_new=True):
+def call_ai_chat(is_new=True):
     # Starts/resumes chat and uses the prompt from the config file
     global current_chat_session, MODEL_NAME, CHAT_PROMPT
     client = get_ai_client()
@@ -402,17 +434,14 @@ def call_AI_chat(is_new=True):
         msg, load_hist = None, True
         winsound.Beep(660, 100)
 
-    threading.Thread(
-        target=lambda: ResultWindow("AI Chat", text=msg, is_chat=True, load_history=load_hist),
-        daemon=True
-    ).start()
+    create_window("AI Chat", text=msg, is_chat=True, load_history=load_hist)
 
-def call_AI(mode):
+def call_ai(mode):
     # Calls the AI API to process the clipboard text
     global MODEL_NAME, AI_API_KEY
     client = get_ai_client()
     if not client:
-        threading.Thread(target=lambda: ResultWindow("Error", "No API Key")).start()
+        create_window("Error", "No API Key")
         return
 
     if not perform_auto_copy():
@@ -429,15 +458,16 @@ def call_AI(mode):
     def run_request():
         try:
             # Use the global client and generate content
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=f"INPUT_TEXT:\n{text}",
-                config={"system_instruction": instruction}
-            )
+            response = None
+            if client is not None:
+                response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=f"INPUT_TEXT:\n{text}",
+                    config={"system_instruction": instruction}
+                )
 
             # Filter out 'thought' parts from the response
-            res = ""
-            if hasattr(response, 'candidates') and response.candidates:
+            if response and hasattr(response, 'candidates') and response.candidates:
                 content = response.candidates[0].content
                 clean_parts = []
                 for part in content.parts:
@@ -445,26 +475,26 @@ def call_AI(mode):
                         continue
                     if hasattr(part, 'text') and part.text:
                         clean_parts.append(part.text)
-                res = "".join(clean_parts).strip()
+                cleaned_res = "".join(clean_parts).strip()
             else:
-                res = response.text.strip()
+                cleaned_res = response.text.strip() if response and hasattr(response, "text") and response.text else ""
 
             # Robust cleaning of AI-generated wrappers
             for wrapper in ["'''", '"""', "```"]:
-                if res.startswith(wrapper) and res.endswith(wrapper):
-                    res = res[len(wrapper):-len(wrapper)].strip()
+                if cleaned_res.startswith(wrapper) and cleaned_res.endswith(wrapper):
+                    cleaned_res = cleaned_res[len(wrapper):-len(wrapper)].strip()
 
-                # Show result in UI (ensure this is called on the main thread via threading if needed)
-            threading.Thread(target=lambda: ResultWindow(f"FixItAI ({MODEL_NAME})", res), daemon=True).start()
+            # Show result in UI (ensure this is called on the main thread via threading if needed)
+            create_window(f"FixItAI ({MODEL_NAME})", cleaned_res)
         except Exception as e:
             error_str = str(e)
             print(f"AI API Error: {error_str}")
-            threading.Thread(target=lambda err=error_str: ResultWindow("API Error", err), daemon=True).start()
+            create_window("API Error", error_str)
 
         # Start the request thread (removed the recursive call inside)
     threading.Thread(target=run_request, daemon=True).start()
 
-def call_AI_vision():
+def call_ai_vision():
     # Extracts text from a clipboard image using AI API
     try:
         client = get_ai_client()
@@ -476,12 +506,12 @@ def call_AI_vision():
 
         # Check if the clipboard contains an image
         if img is None:
-            threading.Thread(target=lambda: ResultWindow("Error", "No image in the Clipboard!"), daemon=True).start()
+            create_window("Error", "No image in the Clipboard!")
             winsound.Beep(300, 400)
             return
 
         if not isinstance(img, Image.Image):
-            threading.Thread(target=lambda: ResultWindow("Error", "No image found in clipboard (maybe it's text?)"), daemon=True).start()
+            create_window("Error", "No image found in clipboard (maybe it's text?)")
             winsound.Beep(300, 400)
             return
 
@@ -493,12 +523,15 @@ def call_AI_vision():
                 vision_instruction = "OCR this image. If you see a table, format it clearly. Return ONLY the text. No yapping."
 
                 # Use global client
-                response = client.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=img,
-                    config={"system_instruction": vision_instruction}
-                )
-                res = response.text.strip()
+                if client is not None:
+                    response = cast(Any, client).models.generate_content(
+                        model=MODEL_NAME,
+                        contents=img,
+                        config={"system_instruction": vision_instruction}
+                    )
+                    res = response.text.strip() if response and hasattr(response, 'text') and response.text else ""
+                else:
+                    res = ""
 
                 # Robust cleaning of AI-generated wrappers
                 for wrapper in ["'''", '"""', "```"]:
@@ -506,26 +539,26 @@ def call_AI_vision():
                         res = res[len(wrapper):-len(wrapper)].strip()
 
                 pyperclip.copy(res)
-                threading.Thread(target=lambda: ResultWindow(f"Vision OCR ({MODEL_NAME})", res), daemon=True).start()
+                create_window(f"Vision OCR ({MODEL_NAME})", res)
                 winsound.Beep(1000, 100)
 
-            except Exception as e:
+            except Exception as vision_err:
                 # Show API error in the UI window
-                error_str = str(e)
-                error_msg = f"AI Vision API Error:\n{error_str}"
-                threading.Thread(target=lambda msg=error_msg: ResultWindow("API Error", msg), daemon=True).start()
+                error_str = str(vision_err)
+                v_ocr_err_msg = f"AI Vision API Error:\n{error_str}"
+                create_window("API Error", v_ocr_err_msg)
                 winsound.Beep(200, 600)
 
             # Start the request in a separate thread to keep the UI responsive
         threading.Thread(target=run_vision_request, daemon=True).start()
 
-    except Exception as e:
+    except Exception as sys_err:
         # Show system/clipboard error in the UI window
-        error_msg = f"System Error during OCR:\n{str(e)}"
-        threading.Thread(target=lambda: ResultWindow("System Error", error_msg), daemon=True).start()
+        sys_ocr_err_msg = f"System Error during OCR:\n{str(sys_err)}"
+        create_window("System Error", sys_ocr_err_msg)
         winsound.Beep(200, 600)
 
-def call_AI_vision_translate():
+def call_ai_vision_translate():
     """Extracts text from an image and translates it to Ukrainian."""
     try:
         client = get_ai_client()
@@ -533,7 +566,7 @@ def call_AI_vision_translate():
 
         img = ImageGrab.grabclipboard()
         if img is None or not isinstance(img, Image.Image):
-            threading.Thread(target=lambda: ResultWindow("Error", "No image in the Clipboard!"), daemon=True).start()
+            create_window("Error", "No image in the Clipboard!")
             winsound.Beep(300, 400)
             return
 
@@ -547,12 +580,15 @@ def call_AI_vision_translate():
                     "Return ONLY the translated text. Maintain formatting if possible. No yapping."
                 )
 
-                response = client.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=img,
-                    config={"system_instruction": instruction}
-                )
-                res = response.text.strip()
+                if client is not None:
+                    response = cast(Any, client).models.generate_content(
+                        model=MODEL_NAME,
+                        contents=img,
+                        config={"system_instruction": instruction}
+                    )
+                    res = response.text.strip() if response and hasattr(response, 'text') and response.text else ""
+                else:
+                    res = ""
 
                 # Clean wrappers
                 for wrapper in ["'''", '"""', "```"]:
@@ -560,19 +596,19 @@ def call_AI_vision_translate():
                         res = res[len(wrapper):-len(wrapper)].strip()
 
                 pyperclip.copy(res)
-                threading.Thread(target=lambda: ResultWindow(f"Vision Translate ({MODEL_NAME})", res), daemon=True).start()
+                create_window(f"Vision Translate ({MODEL_NAME})", res)
                 winsound.Beep(1000, 100)
-            except Exception as e:
-                error_str = str(e)
-                threading.Thread(target=lambda err=error_str: ResultWindow("API Error", err), daemon=True).start()
+            except Exception as vt_err:
+                error_str = str(vt_err)
+                create_window("API Error", error_str)
                 winsound.Beep(200, 600)
 
         threading.Thread(target=run_vision_translate_request, daemon=True).start()
-    except Exception as e:
-        error_msg = str(e)
-        threading.Thread(target=lambda: ResultWindow("System Error", error_msg), daemon=True).start()
+    except Exception as vts_err:
+        vt_sys_error_msg = str(vts_err)
+        create_window("System Error", vt_sys_error_msg)
 
-def call_AI_describe_image():
+def call_ai_describe_image():
     # Describes the content of an image from the clipboard and starts a chat
     global current_chat_session, MODEL_NAME, CHAT_PROMPT
     try:
@@ -593,41 +629,44 @@ def call_AI_describe_image():
                 # System instruction for vision chat
                 instruction = (
                     f"{CHAT_PROMPT}\n\n"
-                    "Ти — QA-інженер. Твоє завдання: "
-                    "1. Коротко описати, що зображено на скріншоті. "
-                    "2. Перевірити його на наявність багів (UI, UX, візуальні помилки, текст, логіка). "
-                    "Відповідай структуровано: спочатку опис, потім перелік знайдених проблем."
+                    "Ти — універсальний AI-аналітик зображень. Твоє завдання — об'єктивно, детально та структуровано описати вміст завантаженого файлу.\n\n"
+                    "АЛГОРИТМ АНАЛІЗУ:\n"
+                    "1. Визнач загальний контекст: що це за тип зображення (скріншот інтерфейсу, фотографія, художній арт, ілюстрація, схема тощо).\n"
+                    "2. Проаналізуй головні елементи: виділи ключові об'єкти, персонажів, текстові блоки або деталі.\n"
+                    "СТРУКТУРА ВІДПОВІДІ:\n"
+                    "- **Тип контенту та загальна суть:** (Коротке визначення того, що перед тобою)\n"
+                    "- **Детальний розбір вмісту:** (Покроковий опис усіх ключових об'єктів, елементів, тексту чи деталей, які видно на зображенні)\n"
                 )
 
                 # Create a new chat session for this image
-                current_chat_session = client.chats.create(
-                    model=MODEL_NAME,
-                    history=[],
-                    config={"system_instruction": instruction}
-                )
+                if client is not None:
+                    current_chat_session = client.chats.create(
+                        model=MODEL_NAME,
+                        history=[],
+                        config={"system_instruction": instruction}
+                    )
 
-                # Send the image as the first message
-                prompt = "Проаналізуй цей скріншот: опиши його зміст, а потім знайди можливі баги або проблеми з інтерфейсом."
-                response = current_chat_session.send_message([prompt, img])
-                res = response.text.strip()
+                    # Send the image as the first message
+                    prompt = "Проаналізуй цей скріншот:"
+                    response = cast(Any, current_chat_session).send_message(message=[prompt, img])
+                    res = response.text.strip() if response else ""
+                else:
+                    res = ""
 
                 # Open Chat Window with the response
-                threading.Thread(
-                    target=lambda: ResultWindow(f"AI Image Chat ({MODEL_NAME})", text=res, is_chat=True, load_history=True),
-                    daemon=True
-                ).start()
+                create_window(f"AI Image Chat ({MODEL_NAME})", text=res, is_chat=True, load_history=True)
                 winsound.Beep(1000, 100)
-            except Exception as e:
-                error_msg = f"AI Vision Error:\n{str(e)}"
-                threading.Thread(target=lambda msg=error_msg: ResultWindow("API Error", msg), daemon=True).start()
+            except Exception as desc_err:
+                desc_api_error_msg = f"AI Vision Error:\n{str(desc_err)}"
+                create_window("API Error", desc_api_error_msg)
                 winsound.Beep(200, 600)
 
         threading.Thread(target=run_describe_request, daemon=True).start()
-    except Exception as e:
-        error_msg = str(e)
-        threading.Thread(target=lambda msg=error_msg: ResultWindow("System Error", msg), daemon=True).start()
+    except Exception as desc_sys_err:
+        desc_sys_error_msg = str(desc_sys_err)
+        create_window("System Error", desc_sys_error_msg)
 
-def call_AI_explain():
+def call_ai_explain():
     # Copies text and asks AI to explain it
     global current_chat_session, MODEL_NAME, CHAT_PROMPT
     client = get_ai_client()
@@ -658,18 +697,15 @@ def call_AI_explain():
             # Sending the specific text to explain
             response = current_chat_session.send_message(f"Explain this:\n{selected_text}")
             # Opening the chat window with the result
-            threading.Thread(
-                target=lambda: ResultWindow("AI Chat (Explanation)", text=response.text, is_chat=True, load_history=True),
-                daemon=True
-            ).start()
+            create_window("AI Chat (Explanation)", text=response.text, is_chat=True, load_history=True)
             winsound.Beep(800, 50)
         except Exception as e:
             error_str = str(e)
-            threading.Thread(target=lambda err=error_str: ResultWindow("Error", err), daemon=True).start()
+            create_window("Error", error_str)
 
     threading.Thread(target=run_explain, daemon=True).start()
 
-def call_AI_summary():
+def call_ai_summary():
     # Summarizes the selected text
     global current_chat_session, MODEL_NAME, CHAT_PROMPT
     client = get_ai_client()
@@ -696,14 +732,11 @@ def call_AI_summary():
     def run_summary():
         try:
             response = current_chat_session.send_message(f"Summarize this:\n{selected_text}")
-            threading.Thread(
-                target=lambda: ResultWindow("AI Chat (Summary)", text=response.text, is_chat=True, load_history=True),
-                daemon=True
-            ).start()
+            create_window("AI Chat (Summary)", text=response.text, is_chat=True, load_history=True)
             winsound.Beep(800, 50)
         except Exception as e:
             error_str = str(e)
-            threading.Thread(target=lambda err=error_str: ResultWindow("Error", err), daemon=True).start()
+            create_window("Error", error_str)
 
     threading.Thread(target=run_summary, daemon=True).start()
 
@@ -713,7 +746,7 @@ def list_models_action():
     def fetch_and_show():
         client = get_ai_client()
         if not client:
-            ResultWindow("Error", "Please set your API Key in APIAndModel.txt first.")
+            create_window("Error", "Please set your API Key in APIAndModel.txt first.")
             return
 
         try:
@@ -736,10 +769,10 @@ def list_models_action():
 
             full_text = "".join(output)
             # Invoke the existing ResultWindow class
-            ResultWindow("Google Models List", full_text)
+            create_window("Google Models List", full_text)
 
         except Exception as e:
-            ResultWindow("API Error", f"Failed to retrieve models: {str(e)}")
+            create_window("API Error", f"Failed to retrieve models: {str(e)}")
 
     # Run in a separate thread to keep the Tray Menu responsive
     threading.Thread(target=fetch_and_show, daemon=True).start()
@@ -796,7 +829,7 @@ def insert_text_template():
             f.write("Environment: Windows 11\nSteps to reproduce:\n1. ")
         winsound.Beep(300, 200)
 
-def force_focus_by_title(target_title="FixItAI"):
+def force_focus_by_title(_target_title="FixItAI"):
     # Forcibly activates the window and steals focus from the OS
     # Allow the window 0.1 seconds for full initialization.
     time.sleep(0.1)
@@ -810,23 +843,25 @@ def force_focus_by_title(target_title="FixItAI"):
 
 # --- Listeners ---
 class CommandHandler(BaseHTTPRequestHandler):
+    # noinspection PyPep8Naming
     def do_GET(self):
         # Extract the command name from the URL (e.g., /fix)
         action = self.path.strip("/")
+        print(f"Received command: {action}")
 
         # Dispatch table: maps action name to (function, arguments)
         actions = {
-            "fix": (call_AI, ("fix",)),
-            "translate": (call_AI, ("translate",)),
+            "fix": (call_ai, ("fix",)),
+            "translate": (call_ai, ("translate",)),
             "template": (insert_text_template, ()),
             "center_window": (resize_and_center_window, ()),
-            "vision": (call_AI_vision, ()),
-            "ocr_translate": (call_AI_vision_translate, ()),
-            "describe_img": (call_AI_describe_image, ()),
-            "chat_new": (call_AI_chat, (True,)),
-            "chat_resume": (call_AI_chat, (False,)),
-            "explain": (call_AI_explain, ()),
-            "summary": (call_AI_summary, ())
+            "vision": (call_ai_vision, ()),
+            "ocr_translate": (call_ai_vision_translate, ()),
+            "describe_img": (call_ai_describe_image, ()),
+            "chat_new": (call_ai_chat, (True,)),
+            "chat_resume": (call_ai_chat, (False,)),
+            "explain": (call_ai_explain, ()),
+            "summary": (call_ai_summary, ())
         }
 
         if action in actions:
@@ -838,12 +873,23 @@ class CommandHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
 
-    def log_message(self, format, *args):
+    def log_message(self, _format, *args):
         return # Disable console log spam
 
 def run_command_server():
-    server = HTTPServer(('127.0.0.1', 41769), CommandHandler)
-    server.serve_forever()
+    try:
+        server = HTTPServer(('127.0.0.1', 41769), cast(Any, CommandHandler))
+        print("Server started on http://127.0.0.1:41769")
+        server.serve_forever()
+    except Exception as e:
+        print(f"Failed to start server: {e}")
+        # Try any interface if 127.0.0.1 fails for some reason
+        try:
+            server = HTTPServer(('0.0.0.0', 41769), cast(Any, CommandHandler))
+            print("Server started on http://0.0.0.0:41769")
+            server.serve_forever()
+        except Exception as e2:
+            print(f"Critical server error: {e2}")
 
 # --- Tray Icon Logic ---
 def create_image():
@@ -874,46 +920,46 @@ def show_help():
     help_text = (
         "FixItAI QUICK GUIDE\n"
         "----------------------------------\n\n"
-        "CapsLock + [+]    : Correct the grammar or translate it into English\n"
+        "CapsLock + [+]    : Correct the grammar or translate to English\n"
         "CapsLock + [-]    : Translate text to Ukrainian\n"
-        "CapsLock + [*]    : Explain selected text & Terms\n"
+        "CapsLock + [*]    : Explain selected text and terms\n"
         "CapsLock + [/]    : Insert text from Template\n"
         "CapsLock + [Num5] : Resize the window to 1500x1100 and center it\n"
-        "CapsLock + [Num1] : Extract & Translate text from Image to Ukrainian\n"
-        "CapsLock + [Num4] : Describe Image from Clipboard\n"
-        "CapsLock + [Num7] : Extract text from Clipboard Image\n"
-        "CapsLock + [Num6] : Quick Summary of selected text\n"
-        "CapsLock + [Num8] : Start a new AI chat (Previous chat history will be cleared)\n"
-        "CapsLock + [Num9] : Resume previous AI Chat\n"
+        "CapsLock + [Num1] : Extract and translate text from image to Ukrainian\n"
+        "CapsLock + [Num4] : Describe image from Clipboard\n"
+        "CapsLock + [Num7] : Extract text from Clipboard image\n"
+        "CapsLock + [Num6] : Quick summary of selected text\n"
+        "CapsLock + [Num8] : Start a new AI chat (previous chat history will be cleared)\n"
+        "CapsLock + [Num9] : Resume previous AI chat\n"
         "\nShift + CapsLock  : To toggle CapsLock state\n"
         "\n"
         f"Current Model: {MODEL_NAME}\n"
     )
-    threading.Thread(target=lambda: ResultWindow("FixItAI Help", help_text), daemon=True).start()
+    create_window("FixItAI Help", help_text)
     winsound.Beep(600, 50)
 
 def on_quit(current_icon, _item):
     # Gracefully shuts down the application.
     print("Closing FixItAI...")
-    # Force close existing AHK script instances (if any).
+    # Force to close existing AHK blocker instance.
     subprocess.run(["taskkill", "/F", "/IM", "FixItAIHotkeysBlocker.exe", "/T"],
-                   capture_output=True, text=True)
+                   capture_output=True, text=True, check=False)
     current_icon.stop()
     os._exit(0)
 
 def setup_tray():
     # Initializes and runs the system tray.
     global tray_icon
-    from pystray import MenuItem as item
+    from pystray import MenuItem as Item
 
     # Creating the menu with new functional items
     menu = pystray.Menu(
-        item('List Available Models', list_models_action),
-        item('Open Config File', open_config_file),
+        Item('List Available Models', list_models_action),
+        Item('Open Config File', open_config_file),
         pystray.Menu.SEPARATOR,
-        item('Open Template File', open_template_file),
-        item('Help', show_help),
-        item('Exit', on_quit)
+        Item('Open Template File', open_template_file),
+        Item('Help', show_help),
+        Item('Exit', on_quit)
     )
 
     tray_icon = pystray.Icon(
@@ -925,13 +971,27 @@ def setup_tray():
     tray_icon.run()
 
 if __name__ == "__main__":
-    # Force close existing AHK script instances (if any).
+    # Force to close existing AHK blocker instance (if any).
+    print("Terminating existing Hotkeys Blocker...")
     subprocess.run(["taskkill", "/F", "/IM", "FixItAIHotkeysBlocker.exe", "/T"],
-                   capture_output=True, text=True)
+                   capture_output=True, text=True, check=False)
 
     ahk_path = get_full_path(os.path.join("FixItAIHotkeysBlocker", "FixItAIHotkeysBlocker.exe"))
-    ahk_process = subprocess.Popen(ahk_path)
+
+    if os.path.exists(ahk_path):
+        print(f"Starting AHK from: {ahk_path}")
+        ahk_process = subprocess.Popen(ahk_path)
+        print(f"AHK process started with PID: {ahk_process.pid}")
+    else:
+        print(f"ERROR: AHK file not found at {ahk_path}")
+
+    # Initialize the single Tkinter root
+    root = tk.Tk()
+    root.withdraw() # Hide the main root window
+    check_queue() # Start processing the window creation queue
 
     threading.Thread(target=setup_tray, daemon=True).start()
+    threading.Thread(target=run_command_server, daemon=True).start()
+
     print(f"FixItAI started. Waiting for AHK commands on port 41769...")
-    run_command_server()
+    root.mainloop()

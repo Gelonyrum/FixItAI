@@ -63,6 +63,7 @@ def load_config():
     default_prompt = (
         "Відповідай ЗАВЖДИ українською мовою. "
         "Твої відповіді мають бути короткими, лаконічними та по суті."
+        "MODERN PUNCTUATION: Prefer periods and commas over semicolons for a clean, modern flow. Do not introduce new semicolons unless essential for complex lists, but ALWAYS preserve semicolons from the original input."
     )
     if not os.path.exists(filename):
         with open(filename, "w", encoding="utf-8") as f:
@@ -112,7 +113,8 @@ PROMPT_FIX = (
     "3. TECHNICAL CONTEXT: Do not hallucinate or add meaning. 'Old code knows' is a personification — keep it, don't change to 'includes'. "
     "4. TRANSLATION: If the input is Ukrainian, translate it into natural, professional English. "
     "5. ARTICLES ACCURACY: Pay special attention to articles (a, an, the). Ensure they are placed correctly according to English grammar rules, especially when translating from article-free languages, while keeping the technical context natural. "
-    "6. Output ONLY the refined text."
+    "6. MODERN PUNCTUATION: Prefer periods and commas over semicolons for a clean, modern flow. Do not introduce new semicolons unless essential for complex lists, but ALWAYS preserve semicolons from the original input. "
+    "7. Output ONLY the refined text."
 )
 
 PROMPT_TRANSLATE = (
@@ -125,6 +127,7 @@ PROMPT_TRANSLATE = (
     "   - Apply MINIMAL INTERVENTION: fix only grammar, punctuation, and clarity. "
     "   - PRESERVE VOICE: keep the original style, technical slang, and vocabulary. "
     "   - TECHNICAL CONTEXT: do not change technical metaphors or 'sanitize' the tone. "
+    "5. MODERN PUNCTUATION: Prefer periods and commas over semicolons for a clean, modern flow. Do not introduce new semicolons unless essential for complex lists, but ALWAYS preserve semicolons from the original input. "
 )
 
 # --- Core Functions ---

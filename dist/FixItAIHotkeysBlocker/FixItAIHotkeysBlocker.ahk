@@ -39,6 +39,17 @@ SendCmd(action) {
     Run('curl -s "http://127.0.0.1:41769/' . action . '"', , "Hide")
 }
 
-; Volume Control (Step 1%)
-Volume_Up::   SoundSetVolume "+1"
-Volume_Down:: SoundSetVolume "-1"
+; Volume Control (Step 1% with OSD)
+$Volume_Up::
+{
+    currVol := SoundGetVolume()
+    Send("{Volume_Up}") ; Викликає стандартну панель Windows
+    SoundSetVolume(currVol + 1) ; Встановлює точний крок +1%
+}
+
+$Volume_Down::
+{
+    currVol := SoundGetVolume()
+    Send("{Volume_Down}") ; Викликає стандартну панель Windows
+    SoundSetVolume(currVol - 1) ; Встановлює точний крок -1%
+}

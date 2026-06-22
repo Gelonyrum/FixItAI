@@ -63,7 +63,7 @@ def load_config():
     default_prompt = (
         "Відповідай ЗАВЖДИ українською мовою. "
         "Твої відповіді мають бути короткими, лаконічними та по суті."
-        "MODERN PUNCTUATION: Prefer periods and commas over semicolons for a clean, modern flow. Do not introduce new semicolons unless essential for complex lists, but ALWAYS preserve semicolons from the original input."
+        "PUNCTUATION LIMIT: ABSOLUTELY FORBID introducing new semicolons (;). Use periods or commas instead. Only allow semicolons if they were already present in the original input. For complex sentence joins, use a period."
     )
     if not os.path.exists(filename):
         with open(filename, "w", encoding="utf-8") as f:
@@ -113,7 +113,7 @@ PROMPT_FIX = (
     "3. TECHNICAL CONTEXT: Do not hallucinate or add meaning. 'Old code knows' is a personification — keep it, don't change to 'includes'. "
     "4. TRANSLATION: If the input is Ukrainian, translate it into natural, professional English. "
     "5. ARTICLES ACCURACY: Pay special attention to articles (a, an, the). Ensure they are placed correctly according to English grammar rules, especially when translating from article-free languages, while keeping the technical context natural. "
-    "6. MODERN PUNCTUATION: Prefer periods and commas over semicolons for a clean, modern flow. Do not introduce new semicolons unless essential for complex lists, but ALWAYS preserve semicolons from the original input. "
+    "6. PUNCTUATION LIMIT: ABSOLUTELY FORBID introducing new semicolons (;). Use periods or commas instead. Only allow semicolons if they were already present in the original input. For complex sentence joins, use a period. "
     "7. Output ONLY the refined text."
 )
 
@@ -127,7 +127,7 @@ PROMPT_TRANSLATE = (
     "   - Apply MINIMAL INTERVENTION: fix only grammar, punctuation, and clarity. "
     "   - PRESERVE VOICE: keep the original style, technical slang, and vocabulary. "
     "   - TECHNICAL CONTEXT: do not change technical metaphors or 'sanitize' the tone. "
-    "5. MODERN PUNCTUATION: Prefer periods and commas over semicolons for a clean, modern flow. Do not introduce new semicolons unless essential for complex lists, but ALWAYS preserve semicolons from the original input. "
+    "5. PUNCTUATION LIMIT: ABSOLUTELY FORBID introducing new semicolons (;). Use periods or commas instead. Only allow semicolons if they were already present in the original input. For complex sentence joins, use a period. "
 )
 
 # --- Core Functions ---
@@ -257,6 +257,22 @@ class ResultWindow(tk.Toplevel):
 
     def handle_control_keys(self, event):
         # Routes control keys (to fix Ctrl+C, Ctrl+V, Ctrl+A, on UA layout)
+        # Use keysym to be layout-independent for common characters
+        char = event.keysym.lower()
+        if char == 'c': return self.manual_copy()
+        elif char == 'v': return self.manual_paste()
+        elif char == 'x': return self.manual_cut()
+        elif char == 'a': return self.select_all()
+        
+        # Check for Ukrainian layout equivalents in Tkinter (usually cyrillic characters)
+        # c -> с (cyrillic s), v -> м (cyrillic m), x -> ч (cyrillic ch), a -> ф (cyrillic f)
+        if char in ('с', 'м', 'ч', 'ф'):
+            if char == 'с': return self.manual_copy()
+            elif char == 'м': return self.manual_paste()
+            elif char == 'ч': return self.manual_cut()
+            elif char == 'ф': return self.select_all()
+
+        # Fallback to keycode for specific cases if needed
         if event.keycode == 67: return self.manual_copy()
         elif event.keycode == 86: return self.manual_paste()
         elif event.keycode == 88: return self.manual_cut()
@@ -274,11 +290,14 @@ class ResultWindow(tk.Toplevel):
     def manual_copy(self, _event=None):
         try:
             focused_widget = self.focus_get()
-
-            if self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
+            if focused_widget == self.txt_area:
+                selected = self.txt_area.get(tk.SEL_FIRST, tk.SEL_LAST)
+            elif self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
                 selected = self.input_field.get(tk.SEL_FIRST, tk.SEL_LAST)
             else:
+                # Default to selection from txt_area if something else is focused or nothing selected in focused
                 selected = self.txt_area.get(tk.SEL_FIRST, tk.SEL_LAST)
+            
             if selected:
                 pyperclip.copy(selected)
         except tk.TclError:
@@ -286,25 +305,42 @@ class ResultWindow(tk.Toplevel):
         return "break"
 
     def manual_paste(self, _event=None):
-        if self.is_chat:
-            # In chat mode, paste ONLY into the input field, ignoring the main window.
-            self.input_field.insert(tk.INSERT, pyperclip.paste())
+        focused_widget = self.focus_get()
+        clipboard_content = pyperclip.paste()
+        
+        if self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
+            self.input_field.insert(tk.INSERT, clipboard_content)
+        elif focused_widget == self.txt_area:
+            # Check if txt_area is editable
+            if self.txt_area.cget("state") == tk.NORMAL:
+                self.txt_area.insert(tk.INSERT, clipboard_content)
         else:
-            # In translation mode, paste into the text area.
-            self.txt_area.insert(tk.INSERT, pyperclip.paste())
+            # Fallback behavior
+            if self.is_chat and hasattr(self, 'input_field'):
+                self.input_field.insert(tk.INSERT, clipboard_content)
+            elif self.txt_area.cget("state") == tk.NORMAL:
+                self.txt_area.insert(tk.INSERT, clipboard_content)
+                
         return "break"  # Stops further propagation of the event in Tkinter.
 
     def manual_cut(self, _event=None):
         focused_widget = self.focus_get()
+        # Cut should only happen on editable widgets
+        is_editable = False
+        if focused_widget == self.txt_area:
+            is_editable = (self.txt_area.cget("state") == tk.NORMAL)
+        elif self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
+            is_editable = True
+
+        if not is_editable:
+            return "break"
+
         self.manual_copy()
         try:
-            if self.is_chat and focused_widget == self.input_field:
+            if focused_widget == self.input_field:
                 self.input_field.delete(tk.SEL_FIRST, tk.SEL_LAST)
             else:
-                self.txt_area.config(state=cast(Literal["normal", "disabled"], tk.NORMAL))
                 self.txt_area.delete(tk.SEL_FIRST, tk.SEL_LAST)
-                if self.is_chat:
-                    self.txt_area.config(state=cast(Literal["normal", "disabled"], tk.DISABLED))
         except tk.TclError:
             pass
         return "break"
@@ -312,10 +348,14 @@ class ResultWindow(tk.Toplevel):
     def select_all(self, _event=None):
         focused_widget = self.focus_get()
 
-        if self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
+        if focused_widget == self.txt_area:
+            self.txt_area.tag_add(tk.SEL, "1.0", tk.END)
+            self.txt_area.mark_set(tk.INSERT, "1.0")
+        elif self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
             self.input_field.tag_add(tk.SEL, "1.0", tk.END)
             self.input_field.mark_set(tk.INSERT, "1.0")
         else:
+            # Default to txt_area
             self.txt_area.tag_add(tk.SEL, "1.0", tk.END)
             self.txt_area.mark_set(tk.INSERT, "1.0")
 

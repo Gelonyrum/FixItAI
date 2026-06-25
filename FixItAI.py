@@ -225,7 +225,7 @@ class ResultWindow(tk.Toplevel):
             # --- TRANSLATE/FIX MODE UI ---
             self.txt_area.pack(expand=True, fill='both', padx=15, pady=(15, 85))
             if text:
-                self.txt_area.insert(tk.INSERT, text)
+                self.txt_area.insert(tk.INSERT, cast(str, text))
 
             self.copy_btn = tk.Button(
                 self, text="Copy & Close", command=self.copy_and_close,
@@ -290,27 +290,39 @@ class ResultWindow(tk.Toplevel):
     def manual_copy(self, _event=None):
         try:
             focused_widget = self.focus_get()
-            if focused_widget == self.txt_area:
-                selected = self.txt_area.get(tk.SEL_FIRST, tk.SEL_LAST)
-            elif self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
-                selected = self.input_field.get(tk.SEL_FIRST, tk.SEL_LAST)
-            else:
-                # Default to selection from txt_area if something else is focused or nothing selected in focused
-                selected = self.txt_area.get(tk.SEL_FIRST, tk.SEL_LAST)
             
-            if selected:
-                pyperclip.copy(selected)
-        except tk.TclError:
-            pass
+            # Determine target widget
+            if focused_widget == self.txt_area:
+                target_widget = self.txt_area
+            elif self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
+                target_widget = self.input_field
+            else:
+                # Default to txt_area
+                target_widget = self.txt_area
+
+            if target_widget:
+                try:
+                    selected = target_widget.get(tk.SEL_FIRST, tk.SEL_LAST)
+                    if selected:
+                        pyperclip.copy(selected)
+                except (tk.TclError, Exception):
+                    # No selection in target_widget or other access error
+                    pass
+        except Exception as e:
+            print(f"Manual copy error: {e}")
         return "break"
 
     def manual_paste(self, _event=None):
         focused_widget = self.focus_get()
         clipboard_content = pyperclip.paste()
         
-        if self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
-            self.input_field.insert(tk.INSERT, clipboard_content)
-        elif focused_widget == self.txt_area:
+        if self.is_chat:
+            if hasattr(self, 'input_field') and focused_widget == self.input_field:
+                self.input_field.insert(tk.INSERT, clipboard_content)
+            # Paste into txt_area is forbidden in chat mode
+            return "break"
+
+        if focused_widget == self.txt_area:
             # Check if txt_area is editable
             if self.txt_area.cget("state") == tk.NORMAL:
                 self.txt_area.insert(tk.INSERT, clipboard_content)
@@ -325,24 +337,43 @@ class ResultWindow(tk.Toplevel):
 
     def manual_cut(self, _event=None):
         focused_widget = self.focus_get()
-        # Cut should only happen on editable widgets
-        is_editable = False
+        
+        # Determine target widget
         if focused_widget == self.txt_area:
-            is_editable = (self.txt_area.cget("state") == tk.NORMAL)
+            target_widget = self.txt_area
         elif self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
-            is_editable = True
+            target_widget = self.input_field
+        else:
+            # Default to txt_area
+            target_widget = self.txt_area
 
-        if not is_editable:
+        if not target_widget:
             return "break"
 
+        # Copy selected text first
         self.manual_copy()
+
+        # In chat mode, cutting from the history (txt_area) is forbidden
+        if self.is_chat and target_widget == self.txt_area:
+            return "break"
+
         try:
-            if focused_widget == self.input_field:
-                self.input_field.delete(tk.SEL_FIRST, tk.SEL_LAST)
-            else:
-                self.txt_area.delete(tk.SEL_FIRST, tk.SEL_LAST)
-        except tk.TclError:
+            # Check if there is a selection before trying to delete
+            if target_widget.tag_ranges(tk.SEL):
+                # Temporarily enable NORMAL state if it was DISABLED to allow deletion
+                old_state = target_widget.cget("state")
+                if old_state != tk.NORMAL:
+                    target_widget.config(state=cast(Literal["normal", "disabled"], tk.NORMAL))
+                
+                target_widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+                
+                # Restore state if we changed it
+                if old_state != tk.NORMAL:
+                    target_widget.config(state=cast(Literal["normal", "disabled"], old_state))
+        except (tk.TclError, Exception):
+            # Occurs if selection disappeared during process or widget state error
             pass
+            
         return "break"
 
     def select_all(self, _event=None):
@@ -417,7 +448,7 @@ class ResultWindow(tk.Toplevel):
                 self.txt_area.insert(tk.END, part)
 
         # 4. Footer line
-        self.txt_area.insert(tk.END, "-"*40 + "\n")
+        self.txt_area.insert(tk.END, "----------------------------------------\n")
         
         # Apply formatting and scroll
         self.txt_area.tag_configure("bold_font", font=("Consolas", 12, "bold"))
@@ -449,11 +480,11 @@ class ResultWindow(tk.Toplevel):
                         # Fallback for simpler responses
                         clean_text = response.text if response.text else ""
 
-                    self.after(0, self.append_message, "Agent", clean_text)
+                    self.after(0, cast(Any, self.append_message), "Agent", clean_text)
                     winsound.Beep(800, 50)
             except Exception as e:
                 error_str = str(e)
-                self.after(0, self.append_message, "Error", error_str)
+                self.after(0, cast(Any, self.append_message), "Error", error_str)
 
         threading.Thread(target=run_async, daemon=True).start()
 

@@ -1,4 +1,5 @@
 Put your API key here
-models/gemini-flash-lite-latest
+models/gemini-3.1-flash-lite
 1) Відповідай ЗАВЖДИ українською мовою
 2) Упускай зайву ввічливість, пиши по-суті
+3) PUNCTUATION LIMIT: ABSOLUTELY FORBID introducing new semicolons (;). Use periods or commas instead. Only allow semicolons if they were already present in the original input. For complex sentence joins, use a period.

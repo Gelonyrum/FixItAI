@@ -153,6 +153,27 @@ def perform_auto_copy():
 
 class ResultWindow(tk.Toplevel):
     """Smart window that adapts UI for translation or chat"""
+
+    WINDOWS_CTRL_KEYS = {
+        65: "select_all",  # A
+        67: "copy",        # C
+        86: "paste",       # V
+        88: "cut",         # X
+    }
+
+    LAYOUT_CTRL_KEYS = {
+        "a": "select_all",
+        "ф": "select_all",
+        "c": "copy",
+        "с": "copy",
+        "v": "paste",
+        "м": "paste",
+        "x": "cut",
+        "ч": "cut",
+    }
+
+    CTRL_MASK = 0x0004
+
     def __init__(self, _title, text=None, is_chat=False, load_history=False):
         super().__init__(root)
         self.title("FixItAI")
@@ -237,11 +258,56 @@ class ResultWindow(tk.Toplevel):
 
         # Core bindings
         self.protocol("WM_DELETE_WINDOW", self.close_window)
-        self.bind_all("<Control-Key>", self.handle_control_keys)
+
+        # Layout-independent clipboard shortcuts.
+        # Uses Windows virtual-key codes first, then falls back to EN/UA keymaps.
+        self._bind_clipboard_shortcuts()
 
         if self.is_chat:
             self.input_field.focus_set()
         threading.Thread(target=lambda: force_focus_by_title("FixItAI"), daemon=True).start()
+
+    def _bind_clipboard_shortcuts(self):
+        widgets = [self.txt_area]
+        if self.is_chat and hasattr(self, "input_field"):
+            widgets.append(self.input_field)
+
+        for widget in widgets:
+            widget.bind("<KeyPress>", self.handle_control_shortcut)
+            widget.bind("<<Copy>>", self.manual_copy)
+            widget.bind("<<Paste>>", self.manual_paste)
+            widget.bind("<<Cut>>", self.manual_cut)
+
+    def _is_ctrl_pressed(self, event):
+        return bool(event.state & self.CTRL_MASK)
+
+    def _get_focused_text_widget(self):
+        focused_widget = self.focus_get()
+
+        if focused_widget == self.txt_area:
+            return self.txt_area
+
+        if self.is_chat and hasattr(self, "input_field") and focused_widget == self.input_field:
+            return self.input_field
+
+        if self.is_chat and hasattr(self, "input_field"):
+            return self.input_field
+
+        return self.txt_area
+
+    def _is_chat_history_widget(self, widget):
+        return self.is_chat and widget == self.txt_area
+
+    @staticmethod
+    def _is_editable(widget):
+        return widget.cget("state") == tk.NORMAL
+
+    @staticmethod
+    def _delete_selection_if_any(widget):
+        if widget.tag_ranges(tk.SEL):
+            widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+            return True
+        return False
 
     # --- Shared Methods ---
     def close_window(self, _event=None):
@@ -255,29 +321,25 @@ class ResultWindow(tk.Toplevel):
         winsound.Beep(1200, 100)
         self.close_window()
 
-    def handle_control_keys(self, event):
-        # Routes control keys (to fix Ctrl+C, Ctrl+V, Ctrl+A, on UA layout)
-        # Use keysym to be layout-independent for common characters
-        char = event.keysym.lower()
-        if char == 'c': return self.manual_copy()
-        elif char == 'v': return self.manual_paste()
-        elif char == 'x': return self.manual_cut()
-        elif char == 'a': return self.select_all()
-        
-        # Check for Ukrainian layout equivalents in Tkinter (usually cyrillic characters)
-        # c -> с (cyrillic s), v -> м (cyrillic m), x -> ч (cyrillic ch), a -> ф (cyrillic f)
-        if char in ('с', 'м', 'ч', 'ф'):
-            if char == 'с': return self.manual_copy()
-            elif char == 'м': return self.manual_paste()
-            elif char == 'ч': return self.manual_cut()
-            elif char == 'ф': return self.select_all()
+    def handle_control_shortcut(self, event):
+        if not self._is_ctrl_pressed(event):
+            return None
 
-        # Fallback to keycode for specific cases if needed
-        if event.keycode == 67: return self.manual_copy()
-        elif event.keycode == 86: return self.manual_paste()
-        elif event.keycode == 88: return self.manual_cut()
-        elif event.keycode == 65: return self.select_all()
-        return None
+        action_name = self.WINDOWS_CTRL_KEYS.get(event.keycode)
+        if action_name is None:
+            keysym = (event.keysym or "").lower()
+            action_name = self.LAYOUT_CTRL_KEYS.get(keysym)
+
+        if action_name is None:
+            return None
+
+        actions = {
+            "copy": self.manual_copy,
+            "paste": self.manual_paste,
+            "cut": self.manual_cut,
+            "select_all": self.select_all,
+        }
+        return actions[action_name]()
 
     def _handle_return(self, event):
         # If Shift+Enter is pressed, insert a line break.
@@ -288,107 +350,64 @@ class ResultWindow(tk.Toplevel):
         return "break"
 
     def manual_copy(self, _event=None):
-        try:
-            focused_widget = self.focus_get()
-            
-            # Determine target widget
-            if focused_widget == self.txt_area:
-                target_widget = self.txt_area
-            elif self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
-                target_widget = self.input_field
-            else:
-                # Default to txt_area
-                target_widget = self.txt_area
+        widget = self._get_focused_text_widget()
 
-            if target_widget:
-                try:
-                    selected = target_widget.get(tk.SEL_FIRST, tk.SEL_LAST)
-                    if selected:
-                        pyperclip.copy(selected)
-                except (tk.TclError, Exception):
-                    # No selection in target_widget or other access error
-                    pass
-        except Exception as e:
-            print(f"Manual copy error: {e}")
+        try:
+            selected = widget.get(tk.SEL_FIRST, tk.SEL_LAST)
+        except tk.TclError:
+            return "break"
+
+        if selected:
+            pyperclip.copy(selected)
+
         return "break"
 
     def manual_paste(self, _event=None):
-        focused_widget = self.focus_get()
+        widget = self._get_focused_text_widget()
+
+        if not self._is_editable(widget):
+            return "break"
+
         clipboard_content = pyperclip.paste()
-        
-        if self.is_chat:
-            if hasattr(self, 'input_field') and focused_widget == self.input_field:
-                self.input_field.insert(tk.INSERT, clipboard_content)
-            # Paste into txt_area is forbidden in chat mode
-            return "break"
-
-        if focused_widget == self.txt_area:
-            # Check if txt_area is editable
-            if self.txt_area.cget("state") == tk.NORMAL:
-                self.txt_area.insert(tk.INSERT, clipboard_content)
-        else:
-            # Fallback behavior
-            if self.is_chat and hasattr(self, 'input_field'):
-                self.input_field.insert(tk.INSERT, clipboard_content)
-            elif self.txt_area.cget("state") == tk.NORMAL:
-                self.txt_area.insert(tk.INSERT, clipboard_content)
-                
-        return "break"  # Stops further propagation of the event in Tkinter.
-
-    def manual_cut(self, _event=None):
-        focused_widget = self.focus_get()
-        
-        # Determine target widget
-        if focused_widget == self.txt_area:
-            target_widget = self.txt_area
-        elif self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
-            target_widget = self.input_field
-        else:
-            # Default to txt_area
-            target_widget = self.txt_area
-
-        if not target_widget:
-            return "break"
-
-        # Copy selected text first
-        self.manual_copy()
-
-        # In chat mode, cutting from the history (txt_area) is forbidden
-        if self.is_chat and target_widget == self.txt_area:
+        if not clipboard_content:
             return "break"
 
         try:
-            # Check if there is a selection before trying to delete
-            if target_widget.tag_ranges(tk.SEL):
-                # Temporarily enable NORMAL state if it was DISABLED to allow deletion
-                old_state = target_widget.cget("state")
-                if old_state != tk.NORMAL:
-                    target_widget.config(state=cast(Literal["normal", "disabled"], tk.NORMAL))
-                
-                target_widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
-                
-                # Restore state if we changed it
-                if old_state != tk.NORMAL:
-                    target_widget.config(state=cast(Literal["normal", "disabled"], old_state))
-        except (tk.TclError, Exception):
-            # Occurs if selection disappeared during process or widget state error
-            pass
-            
+            self._delete_selection_if_any(widget)
+            widget.insert(tk.INSERT, clipboard_content)
+            widget.see(tk.INSERT)
+        except tk.TclError as e:
+            print(f"Manual paste error: {e}")
+
+        return "break"
+
+    def manual_cut(self, _event=None):
+        widget = self._get_focused_text_widget()
+
+        if self._is_chat_history_widget(widget):
+            self.manual_copy()
+            return "break"
+
+        if not self._is_editable(widget):
+            return "break"
+
+        try:
+            selected = widget.get(tk.SEL_FIRST, tk.SEL_LAST)
+        except tk.TclError:
+            return "break"
+
+        if selected:
+            pyperclip.copy(selected)
+            widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+
         return "break"
 
     def select_all(self, _event=None):
-        focused_widget = self.focus_get()
+        widget = self._get_focused_text_widget()
 
-        if focused_widget == self.txt_area:
-            self.txt_area.tag_add(tk.SEL, "1.0", tk.END)
-            self.txt_area.mark_set(tk.INSERT, "1.0")
-        elif self.is_chat and hasattr(self, 'input_field') and focused_widget == self.input_field:
-            self.input_field.tag_add(tk.SEL, "1.0", tk.END)
-            self.input_field.mark_set(tk.INSERT, "1.0")
-        else:
-            # Default to txt_area
-            self.txt_area.tag_add(tk.SEL, "1.0", tk.END)
-            self.txt_area.mark_set(tk.INSERT, "1.0")
+        widget.tag_add(tk.SEL, "1.0", tk.END)
+        widget.mark_set(tk.INSERT, "1.0")
+        widget.see(tk.INSERT)
 
         return "break"
 

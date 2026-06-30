@@ -17,14 +17,6 @@ See the assistant in action: from real-time grammar correction to leveraging Vis
 
 [![FixItAI Video Demo](https://github.com/user-attachments/assets/4cd109cc-7fb9-4e1a-b2a6-115474b1667c)](https://youtu.be/xs3nJSyk-3c)
 
-**Note on video speed:**
-
-FixItAI utilizes reasoning models to ensure maximum accuracy. 
-
-To save time, segments where the AI analyzes complex queries have been sped up by 3x. 
-
-This allows you to observe the full processing workflow without unnecessary delays.
-
 ✨ **Key Features**
 -----------------------------------------------
 📝 **Smart Editing (Grammar Fix):** Corrects grammar, style, and spelling. If the input is in Ukrainian, it automatically translates it into professional "IT English."
